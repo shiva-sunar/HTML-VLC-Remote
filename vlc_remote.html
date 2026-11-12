@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#09090b">
+  <title>VLC Remote</title>
+  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+
+  <!-- External Libraries: Tailwind CSS, FontAwesome 6, Alpine.js -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+  <!-- Dynamic Theme Color Definitions -->
+  <style>
+    [x-cloak] { display: none !important; }
+    body { -webkit-tap-highlight-color: transparent; }
+
+    :root, [data-theme="dark"] {
+      --bg: #09090b; --card: rgba(24, 24, 27, 0.92);
+      --btn: #27272a; --btn-hover: #3f3f46; --border: rgba(39, 39, 42, 0.8);
+      --text: #f4f4f5; --muted: #a1a1aa; --accent: #f97316;
+    }
+    [data-theme="light"] {
+      --bg: #f4f4f6; --card: rgba(255, 255, 255, 0.95);
+      --btn: #e4e4e7; --btn-hover: #d4d4d8; --border: rgba(228, 228, 231, 0.9);
+      --text: #18181b; --muted: #71717a; --accent: #ea580c;
+    }
+    [data-theme="blueish"] {
+      --bg: #060b14; --card: rgba(15, 23, 42, 0.92);
+      --btn: #1e293b; --btn-hover: #334155; --border: rgba(30, 41, 59, 0.8);
+      --text: #f8fafc; --muted: #94a3b8; --accent: #0284c7;
+    }
+    [data-theme="purple"] {
+      --bg: #0a0612; --card: rgba(26, 16, 43, 0.92);
+      --btn: #2e1c4d; --btn-hover: #432870; --border: rgba(59, 33, 99, 0.8);
+      --text: #faf5ff; --muted: #c084fc; --accent: #9333ea;
+    }
+  </style>
+</head>
+<body class="bg-[var(--bg)] text-[var(--text)] min-h-screen flex flex-col items-center justify-center p-3 select-none font-sans transition-colors duration-300"
+      x-data="vlcRemote" :data-theme="theme" x-cloak>
+
+  <!-- Mobile Container (Optimized for Android / Mobile screens) -->
+  <div class="w-full max-w-sm flex flex-col gap-3">
+
+    <!-- Top Status Bar -->
+    <header class="flex items-center justify-between px-1">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-xs shadow-sm"
+             style="background: var(--btn); color: var(--accent); border: 1px solid var(--border)">
+          <i class="fa-solid fa-play text-[10px] ml-0.5"></i>
+        </div>
+        <span class="font-bold text-xs tracking-wider uppercase text-[var(--muted)]">VLC Remote</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border transition-colors"
+           :class="playing ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-[var(--btn)] text-[var(--muted)] border-[var(--border)]'">
+        <span class="w-2 h-2 rounded-full" :class="playing ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'"></span>
+        <span x-text="playing ? 'Playing' : 'Paused'"></span>
+      </div>
+    </header>
+
+    <!-- Now Playing Media Title -->
+    <div class="text-center px-2">
+      <h2 class="text-sm font-semibold text-[var(--text)] truncate" x-text="title" :title="title">&mdash;</h2>
+    </div>
+
+    <!-- Main Controller Card -->
+    <section class="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-5 shadow-2xl backdrop-blur-md transition-colors duration-300">
+      <!-- Primary Action Buttons: Browse, Play/Pause, Fullscreen -->
+      <div class="flex items-center justify-center gap-5 my-1">
+        <!-- Browse -->
+        <button @click="toggleBrowse()" title="Browse files"
+                class="w-14 h-14 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--text)] active:scale-95 transition flex items-center justify-center text-lg shadow-md">
+          <i class="fa-solid fa-folder-open"></i>
+        </button>
+
+        <!-- Big Play / Pause Hero Button -->
+        <button @click="cmd({command: playing ? 'pl_pause' : 'pl_play'})" title="Play / Pause"
+                style="background-color: var(--accent)"
+                class="w-20 h-20 rounded-3xl active:scale-95 transition flex items-center justify-center text-white text-3xl shadow-lg">
+          <i :class="playing ? 'fa-pause' : 'fa-play ml-1'" class="fa-solid"></i>
+        </button>
+
+        <!-- Fullscreen -->
+        <button @click="cmd({command: 'fullscreen'})" title="Toggle Fullscreen"
+                class="w-14 h-14 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--text)] active:scale-95 transition flex items-center justify-center text-lg shadow-md">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+      </div>
+
+      <!-- Seek Row: Left Jump (-10s), Slider & Times, Right Jump (+10s) -->
+      <div class="mt-5 flex items-center gap-2.5">
+        <!-- Backward Jump Button (Hold for 10s, 30s, 1m options) -->
+        <button @touchstart="startJump('rew', $event)" @touchend="endJump('rew', $event)"
+                @mousedown="startJump('rew', $event)" @mouseup="endJump('rew', $event)"
+                @mouseleave="cancelJump()"
+                title="Rewind (Hold for options)"
+                class="w-11 h-11 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--text)] active:scale-95 transition flex flex-col items-center justify-center shadow-sm shrink-0">
+          <i class="fa-solid fa-rotate-left text-xs"></i>
+          <span class="text-[9px] font-bold text-[var(--muted)]" x-text="jumpSecLabel">10s</span>
+        </button>
+
+        <!-- Slider & Time Display -->
+        <div class="flex-1">
+          <input type="range" min="0" max="1000" x-model.number="seekPos"
+                 @touchstart="seekDrag=true" @mousedown="seekDrag=true"
+                 @input="onSeekInput()" @change="onSeekChange()"
+                 style="accent-color: var(--accent)"
+                 class="w-full h-2 bg-[var(--btn)] rounded-lg appearance-none cursor-pointer">
+          <div class="flex justify-between text-xs font-mono text-[var(--muted)] mt-1">
+            <span x-text="fmt(curTimeSec)">00:00</span>
+            <span x-text="fmt(totalLen)">00:00</span>
+          </div>
+        </div>
+
+        <!-- Forward Jump Button (Hold for 10s, 30s, 1m options) -->
+        <button @touchstart="startJump('fwd', $event)" @touchend="endJump('fwd', $event)"
+                @mousedown="startJump('fwd', $event)" @mouseup="endJump('fwd', $event)"
+                @mouseleave="cancelJump()"
+                title="Forward (Hold for options)"
+                class="w-11 h-11 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--text)] active:scale-95 transition flex flex-col items-center justify-center shadow-sm shrink-0">
+          <i class="fa-solid fa-rotate-right text-xs"></i>
+          <span class="text-[9px] font-bold text-[var(--muted)]" x-text="jumpSecLabel">10s</span>
+        </button>
+      </div>
+
+      <!-- Volume Slider -->
+      <div class="flex items-center gap-3 mt-4">
+        <i :class="volume == 0 ? 'fa-volume-xmark text-zinc-500' : (volume < 200 ? 'fa-volume-low text-[var(--muted)]' : 'fa-volume-high text-[var(--text)]')" class="fa-solid w-5 text-center text-sm"></i>
+        <input type="range" min="0" max="512" x-model.number="volume"
+               @input="volDrag=true"
+               @change="cmd({command: 'volume', val: volume}); volDrag=false"
+               style="accent-color: var(--accent)"
+               class="w-full h-2 bg-[var(--btn)] rounded-lg appearance-none cursor-pointer">
+        <span class="text-xs font-mono text-[var(--muted)] w-10 text-right" x-text="Math.round(volume / 5.12) + '%'">100%</span>
+      </div>
+    </section>
+
+    <!-- File Browser Drawer / Modal -->
+    <section x-show="browseOpen" x-transition class="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-4 shadow-xl">
+      <div class="flex items-center justify-between pb-3 border-b border-[var(--border)] gap-2">
+        <button @click="browseBack()" class="px-3 py-1.5 rounded-xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 text-xs text-[var(--text)] flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-arrow-left"></i> Back
+        </button>
+        <span class="text-xs text-[var(--muted)] truncate flex-1 font-mono text-center" x-text="browseDir"></span>
+        <button @click="browseOpen=false" class="px-3 py-1.5 rounded-xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 text-xs text-[var(--text)] transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="space-y-1 mt-2 max-h-[45vh] overflow-y-auto divide-y divide-[var(--border)]">
+        <template x-for="item in browseItems" :key="item.uri">
+          <div @click="openItem(item)" class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-[var(--btn)] active:bg-[var(--btn)] cursor-pointer transition">
+            <i :class="item.icon" class="w-5 text-center text-sm"></i>
+            <span class="text-xs text-[var(--text)] truncate flex-1" x-text="item.name"></span>
+          </div>
+        </template>
+        <div x-show="!browseItems.length" class="text-xs text-[var(--muted)] text-center py-6">Empty or Loading...</div>
+      </div>
+    </section>
+
+    <!-- Advanced Controls Card -->
+    <section class="bg-[var(--card)] border border-[var(--border)] rounded-3xl p-4 shadow-xl transition-colors duration-300">
+      <details @toggle="if ($el.open) poll()" class="group">
+        <summary class="cursor-pointer text-xs font-semibold text-[var(--muted)] hover:text-[var(--text)] flex justify-between items-center py-1 select-none">
+          <span><i class="fa-solid fa-sliders mr-2 text-[var(--muted)]"></i>Advanced Controls</span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-[var(--muted)] group-open:rotate-180 transition-transform"></i>
+        </summary>
+
+        <div class="mt-3 pt-3 border-t border-[var(--border)]">
+          <!-- Advance Menu's Main Bar: Previous, Backward (Speed), STOP, Forward (Speed), Next -->
+          <div class="grid grid-cols-5 gap-2 my-2">
+            <button @click="cmd({command: 'pl_previous'})" title="Previous" class="p-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-[var(--text)] flex items-center justify-center">
+              <i class="fa-solid fa-backward-step"></i>
+            </button>
+            <!-- Backward Button: Click opens Speed Selector (1x, 2x, 3x etc) -->
+            <button @click="openSpeedMenu()" title="Speed / Rewind" class="p-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-[var(--text)] flex items-center justify-center">
+              <i class="fa-solid fa-backward"></i>
+            </button>
+            <!-- Stop Button in Advance Menu's Main Bar -->
+            <button @click="cmd({command: 'pl_stop'})" title="Stop Playback" class="p-3 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-500 active:scale-95 transition flex items-center justify-center">
+              <i class="fa-solid fa-stop"></i>
+            </button>
+            <!-- Forward Button: Click opens Speed Selector (1x, 2x, 3x etc) -->
+            <button @click="openSpeedMenu()" title="Speed / Fast-Forward" class="p-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-[var(--text)] flex items-center justify-center">
+              <i class="fa-solid fa-forward"></i>
+            </button>
+            <button @click="cmd({command: 'pl_next'})" title="Next" class="p-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-[var(--text)] flex items-center justify-center">
+              <i class="fa-solid fa-forward-step"></i>
+            </button>
+          </div>
+
+          <!-- Video Options: Aspect Ratio & Crop Buttons -->
+          <div class="grid grid-cols-2 gap-2 my-2.5">
+            <button @click="openAspectMenu()" title="Select Aspect Ratio"
+                    class="py-2.5 px-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-xs font-medium text-[var(--text)] flex items-center justify-center gap-2">
+              <i class="fa-solid fa-tv text-xs" style="color: var(--accent)"></i>
+              <span>Aspect:</span>
+              <span class="font-bold truncate max-w-[70px]" x-text="aspectRatio">Default</span>
+            </button>
+            <button @click="cycleCrop()" title="Cycle Crop Ratio"
+                    class="py-2.5 px-3 rounded-2xl bg-[var(--btn)] hover:bg-[var(--btn-hover)] active:scale-95 transition text-xs font-medium text-[var(--text)] flex items-center justify-center gap-2">
+              <i class="fa-solid fa-crop-simple text-xs" style="color: var(--accent)"></i>
+              <span>Crop</span>
+              <span class="text-[10px] text-[var(--muted)] font-normal">(Cycle)</span>
+            </button>
+          </div>
+
+          <!-- Playback Modes (Shuffle, Loop, Repeat) -->
+          <div class="flex gap-2 my-3">
+            <button @click="cmd({command: 'pl_random'})"
+                    :style="shuffle ? 'background-color: var(--accent); color: #fff' : ''"
+                    :class="shuffle ? '' : 'bg-[var(--btn)] text-[var(--muted)] hover:text-[var(--text)]'"
+                    class="flex-1 py-2 px-3 rounded-xl text-xs font-medium transition active:scale-95 flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-shuffle"></i> Shuffle
+            </button>
+            <button @click="cmd({command: 'pl_loop'})"
+                    :style="loop ? 'background-color: var(--accent); color: #fff' : ''"
+                    :class="loop ? '' : 'bg-[var(--btn)] text-[var(--muted)] hover:text-[var(--text)]'"
+                    class="flex-1 py-2 px-3 rounded-xl text-xs font-medium transition active:scale-95 flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-repeat"></i> Loop
+            </button>
+            <button @click="cmd({command: 'pl_repeat'})"
+                    :style="repeat ? 'background-color: var(--accent); color: #fff' : ''"
+                    :class="repeat ? '' : 'bg-[var(--btn)] text-[var(--muted)] hover:text-[var(--text)]'"
+                    class="flex-1 py-2 px-3 rounded-xl text-xs font-medium transition active:scale-95 flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-rotate-right"></i> Repeat
+            </button>
+          </div>
+
+          <!-- Sliders: Delays & Speed -->
+          <div class="space-y-3 mt-4">
+            <div class="flex items-center gap-3 text-xs">
+              <span class="w-20 text-[var(--muted)]">Audio Delay</span>
+              <input type="range" min="-5" max="5" step="0.1" x-model="audioDelay" @change="cmd({command: 'audiodelay', val: audioDelay})"
+                     style="accent-color: var(--accent)" class="flex-1 h-1.5 bg-[var(--btn)] rounded-lg appearance-none cursor-pointer">
+              <span class="w-10 text-right font-mono text-[var(--muted)]" x-text="audioDelay + 's'">0s</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs">
+              <span class="w-20 text-[var(--muted)]">Sub Delay</span>
+              <input type="range" min="-5" max="5" step="0.1" x-model="subDelay" @change="cmd({command: 'subdelay', val: subDelay})"
+                     style="accent-color: var(--accent)" class="flex-1 h-1.5 bg-[var(--btn)] rounded-lg appearance-none cursor-pointer">
+              <span class="w-10 text-right font-mono text-[var(--muted)]" x-text="subDelay + 's'">0s</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs">
+              <span class="w-20 text-[var(--muted)]">Speed</span>
+              <input type="range" min="0.25" max="4" step="0.25" x-model="rate" @change="cmd({command: 'rate', val: rate})"
+                     style="accent-color: var(--accent)" class="flex-1 h-1.5 bg-[var(--btn)] rounded-lg appearance-none cursor-pointer">
+              <span class="w-10 text-right font-mono text-[var(--muted)]" x-text="rate + 'x'">1x</span>
+            </div>
+          </div>
+
+          <!-- Theme Color Selector (Light, Dark, Blueish, Purple) -->
+          <div class="mt-4 pt-3 border-t border-[var(--border)]">
+            <div class="text-xs font-medium text-[var(--muted)] mb-2 flex items-center gap-1.5">
+              <i class="fa-solid fa-palette text-xs"></i>
+              <span>Theme Color</span>
+            </div>
+            <div class="grid grid-cols-4 gap-2">
+              <button @click="setTheme('dark')" :class="theme === 'dark' ? 'ring-2 ring-[var(--accent)] font-semibold' : 'opacity-70 hover:opacity-100'"
+                      class="py-2 px-1.5 rounded-xl text-xs bg-[#18181b] text-zinc-100 flex items-center justify-center gap-1.5 transition active:scale-95 border border-zinc-700">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#f97316]"></span> Dark
+              </button>
+              <button @click="setTheme('light')" :class="theme === 'light' ? 'ring-2 ring-[var(--accent)] font-semibold' : 'opacity-70 hover:opacity-100'"
+                      class="py-2 px-1.5 rounded-xl text-xs bg-white text-zinc-900 flex items-center justify-center gap-1.5 transition active:scale-95 border border-zinc-300">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#ea580c]"></span> Light
+              </button>
+              <button @click="setTheme('blueish')" :class="theme === 'blueish' ? 'ring-2 ring-[var(--accent)] font-semibold' : 'opacity-70 hover:opacity-100'"
+                      class="py-2 px-1.5 rounded-xl text-xs bg-[#0f172a] text-sky-100 flex items-center justify-center gap-1.5 transition active:scale-95 border border-slate-700">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#0284c7]"></span> Blue
+              </button>
+              <button @click="setTheme('purple')" :class="theme === 'purple' ? 'ring-2 ring-[var(--accent)] font-semibold' : 'opacity-70 hover:opacity-100'"
+                      class="py-2 px-1.5 rounded-xl text-xs bg-[#1a102b] text-purple-100 flex items-center justify-center gap-1.5 transition active:scale-95 border border-purple-900">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#9333ea]"></span> Purple
+              </button>
+            </div>
+          </div>
+
+          <!-- Subtitle Tracks Accordion -->
+          <details class="mt-4 border-t border-[var(--border)] pt-3 group/sub">
+            <summary class="cursor-pointer text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] flex justify-between items-center py-1">
+              <span><i class="fa-solid fa-closed-captioning mr-2 text-[var(--muted)]"></i>Subtitle Tracks</span>
+              <i class="fa-solid fa-chevron-down text-[10px] text-[var(--muted)] group-open/sub:rotate-180 transition-transform"></i>
+            </summary>
+            <div class="space-y-1 mt-2 max-h-40 overflow-y-auto">
+              <div @click="setSub(-1)" class="p-2.5 rounded-xl text-xs flex justify-between items-center cursor-pointer transition"
+                   :class="currentSubTrack === '-1' ? 'bg-[var(--btn)] text-[var(--accent)] font-bold' : 'hover:bg-[var(--btn)] text-[var(--muted)]'">
+                <span>✕ Disable subtitles</span>
+                <i x-show="currentSubTrack === '-1'" class="fa-solid fa-check"></i>
+              </div>
+              <template x-for="t in subTracks" :key="t.id">
+                <div @click="setSub(t.id)" class="p-2.5 rounded-xl text-xs flex justify-between items-center cursor-pointer transition"
+                     :class="currentSubTrack === String(t.id) ? 'bg-[var(--btn)] text-[var(--accent)] font-bold' : 'hover:bg-[var(--btn)] text-[var(--text)]'">
+                  <span x-text="'#' + t.id + ' — ' + t.label"></span>
+                  <i x-show="currentSubTrack === String(t.id)" class="fa-solid fa-check"></i>
+                </div>
+              </template>
+              <div x-show="!subTracks.length" class="text-xs text-[var(--muted)] p-2">Play something to see tracks</div>
+            </div>
+          </details>
+
+          <!-- Audio Tracks Accordion -->
+          <details class="mt-2 border-t border-[var(--border)] pt-3 group/aud">
+            <summary class="cursor-pointer text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] flex justify-between items-center py-1">
+              <span><i class="fa-solid fa-headphones mr-2 text-[var(--muted)]"></i>Audio Tracks</span>
+              <i class="fa-solid fa-chevron-down text-[10px] text-[var(--muted)] group-open/aud:rotate-180 transition-transform"></i>
+            </summary>
+            <div class="space-y-1 mt-2 max-h-40 overflow-y-auto">
+              <template x-for="t in audioTracks" :key="t.id">
+                <div @click="setAudio(t.id)" class="p-2.5 rounded-xl text-xs flex justify-between items-center cursor-pointer transition"
+                     :class="currentAudioTrack === String(t.id) ? 'bg-[var(--btn)] text-[var(--accent)] font-bold' : 'hover:bg-[var(--btn)] text-[var(--text)]'">
+                  <span x-text="'#' + t.id + ' — ' + t.label"></span>
+                  <i x-show="currentAudioTrack === String(t.id)" class="fa-solid fa-check"></i>
+                </div>
+              </template>
+              <div x-show="!audioTracks.length" class="text-xs text-[var(--muted)] p-2">Play something to see tracks</div>
+            </div>
+          </details>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <!-- Reusable Options Sheet / Modal (Jump, Speed, Aspect Ratio) -->
+  <div x-show="modal.open" x-transition.opacity class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+    <div @click.away="modal.open = false" x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="translate-y-full sm:scale-95" x-transition:enter-end="translate-y-0 sm:scale-100"
+         class="w-full max-w-sm bg-[var(--card)] border border-[var(--border)] rounded-3xl p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+        <div class="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+          <i :class="modal.icon" class="text-sm" style="color: var(--accent)"></i>
+          <span x-text="modal.title"></span>
+        </div>
+        <button @click="modal.open = false" class="w-7 h-7 rounded-full bg-[var(--btn)] text-[var(--muted)] hover:text-[var(--text)] flex items-center justify-center text-xs">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto p-0.5">
+        <template x-for="item in modal.items" :key="item.label">
+          <button @click="item.action(); modal.open = false"
+                  :class="item.active ? 'ring-2 font-bold' : 'bg-[var(--btn)] text-[var(--text)] hover:bg-[var(--btn-hover)]'"
+                  :style="item.active ? 'background-color: var(--accent); color: #fff; ring-color: var(--accent)' : ''"
+                  class="py-3 px-2 rounded-2xl text-xs flex flex-col items-center justify-center gap-0.5 transition active:scale-95">
+            <span x-text="item.label"></span>
+            <span x-show="item.sub" class="text-[9px] opacity-75 font-normal" x-text="item.sub"></span>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reactive Logic & VLC API Client -->
+  <script>
+    const getStreamType = obj => {
+      for (const k in obj) {
+        if (k.replace(/_+$/, '').toLowerCase() === 'type') {
+          const v = obj[k].trim().toLowerCase();
+          if (v === 'audio') return 'audio';
+          if (/sub|sous|unter|sotto|subt|legenda/i.test(v)) return 'subtitle';
+          if (/vid/i.test(v)) return 'video';
+        }
+      }
+      return null;
+    };
+
+    const getStreamLabel = obj => {
+      let lang = '', desc = '', codec = '';
+      for (const k in obj) {
+        const kn = k.replace(/_+$/, '').toLowerCase();
+        if (/^lang/i.test(kn)) lang = obj[k].trim();
+        if (kn === 'description') desc = obj[k].trim();
+        if (/^codec/i.test(kn)) codec = obj[k].trim();
+      }
+      return [lang, desc, codec].filter(Boolean).join(' — ') || 'Unknown';
+    };
+
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('vlcRemote', () => ({
+        title: '—',
+        playing: false,
+        curTimeSec: 0,
+        totalLen: 0,
+        currentTimeSec: 0,
+        seekPos: 0,
+        seekDrag: false,
+        volume: 256,
+        volDrag: false,
+        seekSec: 10,
+        jumpSec: 10,
+        jumpTimer: null,
+        longPressed: false,
+        isTouch: false,
+        audioDelay: 0,
+        subDelay: 0,
+        rate: 1,
+        aspectRatio: 'Default',
+        shuffle: false,
+        loop: false,
+        repeat: false,
+        browseOpen: false,
+        browseDir: localStorage.getItem('vlcBrowseDir') || 'file://~',
+        browseItems: [],
+        subTracks: [],
+        audioTracks: [],
+        currentSubTrack: null,
+        currentAudioTrack: null,
+        lastMediaTitle: '',
+        lastSync: Date.now(),
+        currentRate: 1,
+        theme: localStorage.getItem('vlcTheme') || 'dark',
+
+        // Generic Modal state
+        modal: {
+          open: false,
+          title: '',
+          icon: '',
+          items: []
+        },
+
+        get jumpSecLabel() {
+          return this.jumpSec >= 60 ? (this.jumpSec / 60) + 'm' : this.jumpSec + 's';
+        },
+
+        init() {
+          this.setTheme(this.theme);
+          this.poll();
+          setInterval(() => {
+            if (this.playing && !this.seekDrag && this.totalLen > 0) {
+              const elapsed = (Date.now() - this.lastSync) / 1000;
+              this.curTimeSec = Math.min(this.totalLen, this.currentTimeSec + (elapsed * this.currentRate));
+              this.seekPos = Math.round((this.curTimeSec / this.totalLen) * 1000);
+            }
+          }, 500);
+        },
+
+        setTheme(t) {
+          this.theme = t;
+          localStorage.setItem('vlcTheme', t);
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) {
+            const colors = { dark: '#09090b', light: '#f4f4f6', blueish: '#060b14', purple: '#0a0612' };
+            meta.setAttribute('content', colors[t] || '#09090b');
+          }
+        },
+
+        fmt(s) {
+          s = Math.floor(s || 0);
+          const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+          return (h ? (h < 10 ? '0' : '') + h + ':' : '') + (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
+        },
+
+        cmd(params) {
+          const q = new URLSearchParams(params).toString();
+          fetch('requests/status.xml?' + q).then(() => this.poll()).catch(() => {});
+        },
+
+        poll() {
+          fetch('requests/status.json')
+            .then(r => r.json())
+            .then(d => {
+              const name = d.information?.category?.meta?.filename || d.information?.category?.meta?.title || '';
+              this.title = name || '—';
+              if (name && name !== this.lastMediaTitle) {
+                this.lastMediaTitle = name;
+                this.currentSubTrack = localStorage.getItem('vlcSubTrack_' + name) || null;
+                this.currentAudioTrack = localStorage.getItem('vlcAudioTrack_' + name) || null;
+              }
+              this.totalLen = d.length || 0;
+              this.currentTimeSec = d.time || 0;
+              this.lastSync = Date.now();
+              this.currentRate = d.rate || 1;
+              if (!this.seekDrag) {
+                this.curTimeSec = this.currentTimeSec;
+                this.seekPos = Math.round((d.position || 0) * 1000);
+              }
+              if (!this.volDrag) this.volume = d.volume || 0;
+              this.playing = d.state === 'playing';
+              this.shuffle = !!d.random;
+              this.loop = !!d.loop;
+              this.repeat = !!d.repeat;
+              this.rate = d.rate || 1;
+              this.audioDelay = d.audiodelay || 0;
+              this.subDelay = d.subtitledelay || 0;
+              this.seekSec = d.seek_sec || 10;
+              if (d.aspectratio) {
+                this.aspectRatio = d.aspectratio.toLowerCase() === 'default' ? 'Default' : d.aspectratio;
+              }
+              this.parseTracks(d);
+            })
+            .catch(() => {});
+        },
+
+        // --- Seekbar Jump Handlers (Left & Right Buttons) ---
+        startJump(dir, e) {
+          if (e.type === 'touchstart') this.isTouch = true;
+          if (e.type === 'mousedown' && this.isTouch) return;
+          this.longPressed = false;
+          this.jumpTimer = setTimeout(() => {
+            this.longPressed = true;
+            this.showJumpMenu(dir);
+          }, 800);
+        },
+
+        endJump(dir, e) {
+          if (e.type === 'touchend') {
+            e.preventDefault();
+            setTimeout(() => { this.isTouch = false; }, 300);
+          }
+          if (this.jumpTimer) {
+            clearTimeout(this.jumpTimer);
+            this.jumpTimer = null;
+          }
+          if (!this.longPressed) {
+            this.cmd({ command: 'seek', val: (dir === 'rew' ? '-' : '+') + this.jumpSec + 'S' });
+          }
+        },
+
+        cancelJump() {
+          if (this.jumpTimer) {
+            clearTimeout(this.jumpTimer);
+            this.jumpTimer = null;
+          }
+        },
+
+        showJumpMenu(dir) {
+          const isRew = dir === 'rew';
+          const opts = [
+            { label: '10s', sec: 10 },
+            { label: '30s', sec: 30 },
+            { label: '1m', sec: 60 },
+            { label: '5m', sec: 300 }
+          ];
+          this.modal = {
+            open: true,
+            title: isRew ? 'Jump Backward' : 'Jump Forward',
+            icon: isRew ? 'fa-solid fa-rotate-left' : 'fa-solid fa-rotate-right',
+            items: opts.map(o => ({
+              label: (isRew ? '-' : '+') + o.label,
+              active: this.jumpSec === o.sec,
+              action: () => {
+                this.jumpSec = o.sec;
+                this.cmd({ command: 'seek', val: (isRew ? '-' : '+') + o.sec + 'S' });
+              }
+            }))
+          };
+        },
+
+        // --- Advanced: Speed Selector Menu (1x, 2x, 3x etc) ---
+        openSpeedMenu() {
+          const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+          this.modal = {
+            open: true,
+            title: 'Playback Speed',
+            icon: 'fa-solid fa-gauge-high',
+            items: speeds.map(s => ({
+              label: s + 'x',
+              sub: s === 1 ? 'Normal' : (s > 1 ? 'Fast' : 'Slow'),
+              active: Number(this.rate) === s,
+              action: () => {
+                this.rate = s;
+                this.cmd({ command: 'rate', val: s });
+              }
+            }))
+          };
+        },
+
+        // --- Advanced: Aspect Ratio Menu ---
+        openAspectMenu() {
+          const aspects = [
+            { label: 'Default', val: '' },
+            { label: '16:9', val: '16:9' },
+            { label: '4:3', val: '4:3' },
+            { label: '16:10', val: '16:10' },
+            { label: '1:1', val: '1:1' },
+            { label: '2.35:1', val: '235:100' },
+            { label: '2.39:1', val: '239:100' },
+            { label: '2.21:1', val: '221:100' },
+            { label: '5:4', val: '5:4' }
+          ];
+          this.modal = {
+            open: true,
+            title: 'Aspect Ratio',
+            icon: 'fa-solid fa-tv',
+            items: aspects.map(a => ({
+              label: a.label,
+              active: (this.aspectRatio.toLowerCase() === a.label.toLowerCase()) || 
+                      (a.val === '' && this.aspectRatio.toLowerCase() === 'default') ||
+                      (this.aspectRatio === a.val),
+              action: () => {
+                this.aspectRatio = a.label;
+                this.cmd({ command: 'aspectratio', val: a.val });
+              }
+            }))
+          };
+        },
+
+        cycleCrop() {
+          this.cmd({ command: 'key', val: 'crop' });
+        },
+
+        onSeekInput() {
+          this.curTimeSec = (this.seekPos / 1000) * this.totalLen;
+          this.lastSync = Date.now();
+        },
+
+        onSeekChange() {
+          this.curTimeSec = (this.seekPos / 1000) * this.totalLen;
+          this.lastSync = Date.now();
+          this.cmd({ command: 'seek', val: (this.seekPos / 10) + '%' });
+          this.seekDrag = false;
+        },
+
+        parseTracks(d) {
+          const cat = d.information?.category;
+          if (!cat) return;
+          const subs = [], auds = [];
+          for (const k in cat) {
+            if (k === 'meta') continue;
+            const num = k.match(/(\d+)/);
+            if (!num) continue;
+            const id = num[1], stype = getStreamType(cat[k]), label = getStreamLabel(cat[k]);
+            if (stype === 'subtitle') subs.push({ id, label });
+            else if (stype === 'audio') auds.push({ id, label });
+          }
+          this.subTracks = subs.sort((a, b) => a.id - b.id);
+          this.audioTracks = auds.sort((a, b) => a.id - b.id);
+          if (this.currentAudioTrack === null && this.audioTracks.length > 0) {
+            this.currentAudioTrack = String(this.audioTracks[0].id);
+          }
+        },
+
+        setSub(id) {
+          this.currentSubTrack = String(id);
+          if (this.lastMediaTitle) localStorage.setItem('vlcSubTrack_' + this.lastMediaTitle, this.currentSubTrack);
+          this.cmd({ command: 'subtitle_track', val: id });
+        },
+
+        setAudio(id) {
+          this.currentAudioTrack = String(id);
+          if (this.lastMediaTitle) localStorage.setItem('vlcAudioTrack_' + this.lastMediaTitle, this.currentAudioTrack);
+          this.cmd({ command: 'audio_track', val: id });
+        },
+
+        toggleBrowse() {
+          this.browseOpen = !this.browseOpen;
+          if (this.browseOpen) this.browse(this.browseDir);
+          else this.poll();
+        },
+
+        browse(dir) {
+          this.browseDir = dir;
+          try { localStorage.setItem('vlcBrowseDir', dir); } catch(e) {}
+          fetch('requests/browse.xml?uri=' + encodeURIComponent(dir))
+            .then(r => r.text())
+            .then(txt => {
+              const doc = new DOMParser().parseFromString(txt, 'text/xml');
+              const elems = doc.getElementsByTagName('element');
+              const items = [];
+              const exts = {
+                vid: ['asf','avi','divx','flv','m4v','mkv','mov','mp4','mpeg','mpg','ogv','ts','vob','wmv','webm'],
+                aud: ['aac','ac3','flac','m4a','mp3','oga','ogg','wav','wma'],
+                pl: ['m3u','m3u8','pls','xspf']
+              };
+              for (let i = 0; i < elems.length; i++) {
+                const name = elems[i].getAttribute('name'), type = elems[i].getAttribute('type'), uri = elems[i].getAttribute('uri');
+                const ext = (name.split('.').pop() || '').toLowerCase();
+                if (type === 'dir' || exts.vid.includes(ext) || exts.aud.includes(ext) || exts.pl.includes(ext)) {
+                  let icon = 'fa-solid fa-file text-[var(--muted)]';
+                  if (type === 'dir') icon = name === '..' ? 'fa-solid fa-arrow-turn-up text-amber-400' : 'fa-solid fa-folder text-amber-400';
+                  else if (exts.vid.includes(ext)) icon = 'fa-solid fa-film text-purple-400';
+                  else if (exts.aud.includes(ext)) icon = 'fa-solid fa-music text-emerald-400';
+                  items.push({ name, type, uri, icon });
+                }
+              }
+              this.browseItems = items;
+            })
+            .catch(() => {});
+        },
+
+        openItem(item) {
+          if (item.type === 'dir') {
+            this.browse(item.uri);
+          } else {
+            this.cmd({ command: 'in_play', input: item.uri });
+            this.browseOpen = false;
+          }
+        },
+
+        browseBack() {
+          const parts = this.browseDir.replace(/\/+$/, '').split('/');
+          parts.pop();
+          this.browse(parts.join('/') || 'file:///');
+        }
+      }));
+    });
+  </script>
+</body>
+</html>
